@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>منصة الألعاب والدردشة - تسجيل Google</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <!-- استدعاء فايربيس (Firebase SDK) مع الإعدادات الحقيقية الخاصة بك -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+        // إعدادات مشروعك الحقيقية من Firebase
+        const firebaseConfig = {
+            apiKey: "AIzaSyBzLE6ayZm5hrHHZhvwTvisibkZQrVBQuc",
+            authDomain: "my-dis.firebaseapp.com",
+            projectId: "my-dis",
+            storageBucket: "my-dis.firebasestorage.app",
+            messagingSenderId: "321213589923",
+            appId: "1:321213589923:web:40c81edf8a3cc01dd1d216",
+            measurementId: "G-EBVK1WQ3XX"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const provider = new GoogleAuthProvider();
+
+        window.loginWithGoogle = function() {
+            signInWithPopup(auth, provider)
+            .then((result) => {
+                const user = result.user;
+                // بعد نجاح تسجيل دخول جوجل، نطلب منه اختيار يوزر نيم دقيق
+                document.getElementById('loginOverlay').style.display = 'none';
+                document.getElementById('usernameModal').style.display = 'flex';
+                window.googleUserEmail = user.email;
+            })
+            .catch((error) => {
+                alert("فشل تسجيل الدخول: " + error.message);
+            });
+        };
+    </script>
+
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #0b0e14; color: #d1d5db; display: flex; height: 100vh; overflow: hidden; }
+
+        /* شاشة تسجيل الدخول */
+        .overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(11, 14, 20, 0.95);
+            display: flex; justify-content: center; align-items: center; z-index: 1000;
+        }
+        .card {
+            background-color: #121620; border: 1px solid #1f293d; padding: 40px; border-radius: 12px; width: 400px; text-align: center;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        }
+        .card h2 { color: #ffffff; margin-bottom: 20px; font-size: 22px; }
+        .google-btn {
+            background-color: #ffffff; color: #333; border: none; padding: 12px 20px; border-radius: 8px; font-weight: bold; font-size: 15px;
+            cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; transition: 0.2s;
+        }
+        .google-btn:hover { background-color: #f3f4f6; }
+
+        .card input {
+            width: 100%; background-color: #1a2230; border: 1px solid #2a364d; padding: 12px; border-radius: 8px; color: white;
+            font-size: 15px; margin-bottom: 15px; outline: none; text-align: center;
+        }
+        .card button.action-btn {
+            width: 100%; background-color: #8b5cf6; color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; cursor: pointer;
+        }
+
+        /* التطبيق الرئيسي */
+        .app-container { display: flex; width: 100%; height: 100vh; display: none; }
+        .rail { width: 72px; background-color: #121620; display: flex; flex-direction: column; align-items: center; padding-top: 15px; gap: 12px; border-left: 1px solid #1f293d; }
+        .server-icon { width: 48px; height: 48px; background-color: #1e2530; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #8b5cf6; font-weight: bold; cursor: pointer; }
+        .server-icon.active { border-radius: 16px; background-color: #8b5cf6; color: #ffffff; }
+
+        .sub-sidebar { width: 260px; background-color: #121620; border-left: 1px solid #1f293d; display: flex; flex-direction: column; }
+        .sidebar-header { height: 60px; padding: 0 16px; display: flex; align-items: center; font-weight: bold; border-bottom: 1px solid #1f293d; color: white; }
+        .friends-section { flex: 1; padding: 16px; overflow-y: auto; }
+        .section-title { font-size: 12px; color: #9ca3af; margin-bottom: 10px; font-weight: bold; }
+        .friend-item { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 6px; margin-bottom: 4px; }
+        .status-dot { width: 10px; height: 10px; background-color: #10b981; border-radius: 50%; }
+
+        .add-friend-panel { padding: 12px; border-top: 1px solid #1f293d; display: flex; gap: 8px; }
+        .add-friend-panel input { flex: 1; background-color: #1a2230; border: 1px solid #2a364d; padding: 8px; border-radius: 6px; color: white; font-size: 13px; outline: none; }
+        .add-friend-panel button { background-color: #10b981; border: none; color: white; padding: 0 10px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+
+        /* منطقة الإشعارات الجانبية */
+        .notifications-panel { width: 220px; background-color: #0f131c; border-left: 1px solid #1f293d; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+        .notification-card { background-color: #181f2e; padding: 10px; border-radius: 8px; border-right: 3px solid #10b981; font-size: 13px; }
+        .notification-card button { margin-top: 5px; background-color: #10b981; border: none; color: white; padding: 4px 8px; border-radius: 4px; cursor: pointer; }
+
+        /* الشات الرئيسي */
+        .chat-area { flex: 1; display: flex; flex-direction: column; background-color: #0f131c; }
+        .chat-header { height: 60px; background-color: #121620; border-bottom: 1px solid #1f293d; display: flex; align-items: center; padding: 0 20px; font-weight: bold; font-size: 18px; color: #ffffff; }
+        .messages-box { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
+        .message { background-color: #181f2e; padding: 12px 16px; border-radius: 10px; max-width: 75%; border-right: 3px solid #8b5cf6; }
+        .message span { font-weight: bold; color: #10b981; margin-left: 10px; }
+        .input-container { padding: 20px; background-color: #121620; display: flex; gap: 12px; border-top: 1px solid #1f293d; }
+        .input-container input { flex: 1; background-color: #1a2230; border: 1px solid #2a364d; padding: 14px; border-radius: 8px; color: white; outline: none; }
+        .input-container button { background-color: #8b5cf6; color: white; border: none; padding: 0 24px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+    </style>
+</head>
+<body>
+
+    <!-- 1. شاشة تسجيل الدخول بحساب جوجل -->
+    <div id="loginOverlay" class="overlay">
+        <div class="card">
+            <h2>تسجيل الدخول الحقيقي</h2>
+            <button class="google-btn" onclick="loginWithGoogle()">
+                <svg width="18" height="18" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.19v3.15C3.17 21.36 7.22 24 12 24z"/><path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.19C.43 8.1 0 9.99 0 12s.43 3.9 1.19 5.42l4.09-3.15z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.22 0 3.17 2.64 1.19 6.58l4.09 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/></svg>
+                تسجيل الدخول باستخدام Google
+            </button>
+        </div>
+    </div>
+
+    <!-- 2. نافذة اختيار اليوزر النيم الدقيق -->
+    <div id="usernameModal" class="overlay" style="display: none;">
+        <div class="card">
+            <h2>اختر اسم المستخدم الفريد (Username)</h2>
+            <input type="text" id="finalUsernameInput" placeholder="مثال: Bashar_X">
+            <button class="action-btn" onclick="setUniqueUsername()">تأكيد ودخول</button>
+        </div>
+    </div>
+
+    <!-- 3. التطبيق الرئيسي -->
+    <div class="app-container" id="appContainer">
+        <div class="rail">
+            <div class="server-icon active">🎮</div>
+        </div>
+
+        <!-- قائمة الأصدقاء -->
+        <div class="sub-sidebar">
+            <div class="sidebar-header"><span>الأصدقاء</span></div>
+            <div class="friends-section">
+                <div class="section-title">المتواجدون</div>
+                <div id="usersList"></div>
+            </div>
+            <div class="add-friend-panel">
+                <input type="text" id="targetUser" placeholder="يوزر صديقك الدقيق...">
+                <button onclick="sendFriendRequest()">إضافة</button>
+            </div>
+        </div>
+
+        <!-- شات المحادثة -->
+        <div class="chat-area">
+            <div class="chat-header"># غرفة-الألعاب العامة</div>
+            <div id="messages" class="messages-box"></div>
+            <div class="input-container">
+                <input type="text" id="messageInput" placeholder="اكتب رسالتك..." autocomplete="off">
+                <button onclick="sendMessage()">إرسال</button>
+            </div>
+        </div>
+
+        <!-- لوحة الإشعارات الجانبية (طلبات الأصدقاء) -->
+        <div class="notifications-panel">
+            <div class="section-title">الإشعارات والطلبات</div>
+            <div id="notificationsList">
+                <span style="font-size: 12px; color: #6b7280;">لا توجد إشعارات جديدة</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let socket;
+        let myUsername = "";
+
+        function setUniqueUsername() {
+            const val = document.getElementById('finalUsernameInput').value.trim();
+            if (val === "") {
+                alert("الرجاء إدخال يوزر صالح!");
+                return;
+            }
+            myUsername = val;
+            document.getElementById('usernameModal').style.display = 'none';
+            document.getElementById('appContainer').style.display = 'flex';
+
+            // الاتصال بالسيرفر مع إرسال اليوزر الدقيق
+            socket = io();
+            socket.emit('join_user', myUsername);
+
+            socket.on('receive_message', (data) => {
+                const box = document.getElementById('messages');
+                box.innerHTML += `<div class="message"><span>${data.user}:</span> ${data.text}</div>`;
+                box.scrollTop = box.scrollHeight;
+            });
+
+            socket.on('update_users', (users) => {
+                const list = document.getElementById('usersList');
+                list.innerHTML = users.map(u => `<div class="friend-item"><div class="status-dot"></div><span>${u}</span></div>`).join('');
+            });
+
+            // استقبال إشعار طلب إضافة صديق بشكل دقيق
+            socket.on('friend_request', (data) => {
+                const notifList = document.getElementById('notificationsList');
+                notifList.innerHTML += `
+                    <div class="notification-card">
+                        <b>${data.from}</b> أرسل لك طلب إضافة!
+                        <br><button onclick="alert('تم قبول الصديق بنجاح!')">قبول</button>
+                    </div>
+                `;
+            });
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            if (input.value.trim() !== '') {
+                socket.emit('send_message', { user: myUsername, text: input.value });
+                input.value = '';
+            }
+        }
+
+        function sendFriendRequest() {
+            const target = document.getElementById('targetUser').value.trim();
+            if (target !== '') {
+                socket.emit('send_friend_request', { from: myUsername, to: target });
+                alert('تم إرسال طلب الاضافة إلى المستخدم: ' + target);
+                document.getElementById('targetUser').value = '';
+            }
+        }
+    </script>
+</body>
+</html>
