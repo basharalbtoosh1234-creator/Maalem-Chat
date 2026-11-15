@@ -1,380 +1,493 @@
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>معلم شات - Maalem Chat | منصة الألعاب والدردشة</title>
-    <meta name="description" content="معلم شات Maalem Chat هو التطبيق الرسمي للدردشة وألعاب السايبربانك، تواصل مع أصدقائك بكل احترافية.">
-    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="/socket.io/socket.io.js"></script>
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getAuth, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+require('dotenv').config();
+const Discord = require('discord.js');
+const axios = require('axios');
+const fs = require('fs');
+const path = require('path');
 
-        const firebaseConfig = {
-            apiKey: "AIzaSyBzLE6ayZm5hrHHZhvwTvisibkZQrVBQuc",
-            authDomain: "my-dis.firebaseapp.com",
-            projectId: "my-dis",
-            storageBucket: "my-dis.firebasestorage.app",
-            messagingSenderId: "321213589923",
-            appId: "1:321213589923:web:40c81edf8a3cc01dd1d216",
-            measurementId: "G-EBVK1WQ3XX"
-        };
+// ===================== الإعدادات =====================
+const CHANNEL_ID = '1570044805315301467'; // القناة اللي البوت بيرد فيها
+const HISTORY_MAX = 10;                   // عدد الأسئلة اللي بتنحفظ لكل طالب
+const MAX_IMAGES = 3;                     // أقصى عدد صور بالرسالة
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;  // أقصى حجم للصورة 8MB
 
-        const app = initializeApp(firebaseConfig);
-        const auth = getAuth(app);
-        const provider = new GoogleAuthProvider();
+// بيجرب الموديلات بالترتيب، وإذا واحد فشل أو رد معطوب بروح للي بعده.
+// الموديلات المجانية بتتغير، إذا واحد انحذف بدله من openrouter.ai/models?pricing=free
 
-        window.loginWithGoogle = function() {
-            signInWithPopup(auth, provider)
-            .then((result) => {
-                const user = result.user;
-                const defaultName = user.displayName ? user.displayName.replace(/\s+/g, '_') : "المعلم";
-                const defaultAvatar = user.photoURL || "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150";
-                
-                document.getElementById('finalUsernameInput').value = defaultName;
-                window.tempUserAvatar = defaultAvatar;
+// للأسئلة النصية
+const TEXT_MODELS = [
+  'google/gemma-4-31b-it:free',        // مجاني
+  'google/gemma-4-31b-it',             // نفس الموديل بس مدفوع ورخيص جداً (بشتغل لو في رصيد بالحساب)
+  'nvidia/nemotron-3.5-lightning:free',
+];
 
-                document.getElementById('loginOverlay').style.display = 'none';
-                document.getElementById('usernameModal').style.display = 'flex';
-            })
-            .catch((error) => {
-                alert("يا معلم، فشل تسجيل الدخول: " + error.message);
-            });
-        };
-    </script>
+// للصور (لازم موديلات بتشوف الصور)
+const VISION_MODELS = [
+  'google/gemma-4-31b-it:free',
+  'google/gemma-4-31b-it',
+  'nvidia/nemotron-3.5-super-vl:free',
+];
 
-    <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Cairo', sans-serif; }
-        body { background-color: #0b0e14; color: #d1d5db; display: flex; height: 100vh; overflow: hidden; }
+const SYSTEM_PROMPT = `
+أنت أستاذ أردني خبير ومخضرم، دحيح وشرحك بيدخل المخ دغري وبشرح القلب! مهنتك الأساسية مساعدة طلاب توجيهي الأردن والمنهاج الأردني بكل تفاصيله ومواده بدقة عالية، وتشرح الدروس بكل حماس وكأنك قاعد مع الطالب وجهاً لوجه.
 
-        .overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background-color: rgba(11, 14, 20, 0.96);
-            display: flex; justify-content: center; align-items: center; z-index: 1000;
+قواعد وأسلوب حديثك:
+1. اللهجة والأسلوب: تتحدث بالعامية الأردنية الأصيلة، ودود، راعي فزعة، وبتعرف تنكت وتتمزح مع الطلاب بحدود لطيفة عشان تكسر ملل الدراسة وتعطيهم طاقة إيجابية وحماس.
+2. الترتيب والدقة: معلوماتك الأكاديمية دقيقة جداً وموثوقة حسب المناهج الرسمية، وأسلوبك مرتب ومنظم بتنسيق الإجابات بنقاط واضحة.
+3. التعريف بالسيرفر (VORTEX): إذا سألك أي شخص عن السيرفر أو شو هو، جاوبه بروح الأستاذ الفخور: "يا هلا! هاض طال عمرك سيرفر VORTEX، مجتمع دراسي مرتب ومبني على التعاون والمساعدة بين الشباب عشان نختم المنهج ونفلل. نظامنا هون شغال (بالدراسة بالجولات)، يعني لازم الكل يلتزم بالجولة الحالية وجدولها عشان نظل ماشيين صح ومنجزين. ومؤسسين السيرفر (الاونرات) اللي تعبانين عليه هم الكباتن: N3S وعبدالحق."
+4. الدقة والاختصار: جاوب بشكل مباشر ومختصر ودقيق، بدون حشو أو تكرار أو كلام زيادة. لا تألف معلومات من عندك، وإذا مش متأكد من شي قول "مش متأكد" بدل ما تخمّن. رتب الإجابة بنقاط قصيرة وواضحة.
+5. اللغة: اكتب بالعربية (عامية أردنية بسيطة) فقط، وتجنب أي لغة أو رموز غريبة. المصطلحات العلمية بس تنكتب بالانجليزي بين قوسين.
+6. الصور: إذا الطالب بعت صورة فيها سؤال أو مسألة، اقرأها بتركيز، واكتب السؤال باختصار، وبعدين حله خطوة خطوة مع الجواب النهائي واضح بالآخر. إذا في جزء بالصورة مش واضح أو مش مقروء، قول هيك صراحة وما تخمّن. إذا الصورة مش سؤال (شرح، ملاحظات، رسمة)، لخّصها وشرحها للطالب.
+7. الرياضيات: ديسكورد ما بيعرض LaTeX أبداً، فممنوع تكتب علامة $ أو أي أمر فيه شرطة مائلة عكسية زي rightarrow أو frac أو cdot. اكتب الرموز مباشرة بالشكل اللي بينعرض: الأسهم → ، الضرب × أو · ، الكسور 1/2 أو (x+1)/(x−1) ، الأسس x² و x³ و xⁿ ، الجذر √x ، ورموز زي ≤ ≥ ≠ ± π θ ∞ °.
+8. الصدق: لا تجاوب أبداً على سؤال ما قدرت تقرأه بوضوح. إذا الخيارات أو أي جزء من السؤال مش واضح، قول هيك واطلب من الطالب يعيد الصورة أو يكتب السؤال، وما تألف رموز أو أرقام أو خيارات من عندك.
+
+دائماً خليك سند للطلاب، شجعهم، وخليهم يحبوا الدراسة معك!
+`;
+
+const DEFAULT_IMAGE_QUESTION = 'حل السؤال الموجود بالصورة خطوة خطوة بشكل مرتب ودقيق، وحط الجواب النهائي بالآخر.';
+
+// ===================== فحص المتغيرات =====================
+if (!process.env.DISCORD_TOKEN || !process.env.OPENROUTER_API_KEY) {
+  console.error('ناقص شي بملف .env — لازم يكون فيه DISCORD_TOKEN و OPENROUTER_API_KEY');
+  process.exit(1);
+}
+
+// ===================== تخزين المحادثات =====================
+const dataDir = path.join(__dirname, 'Data');
+if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+const dataFile = path.join(dataDir, 'conversations.json');
+
+function loadConversations() {
+  try {
+    if (fs.existsSync(dataFile)) return JSON.parse(fs.readFileSync(dataFile, 'utf-8')) || {};
+  } catch (e) {
+    console.error('conversations.json تالف، رح يبدأ من جديد');
+  }
+  return {};
+}
+
+function saveConversations(conversations) {
+  try {
+    fs.writeFileSync(dataFile, JSON.stringify(conversations, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('فشل حفظ المحادثات:', e.message);
+  }
+}
+
+// ===================== أدوات مساعدة =====================
+// بتقسم الرد الطويل لعدة رسائل بنفس الشات (حد ديسكورد 2000 حرف)
+function splitMessage(text, limit = 1900) {
+  const chunks = [];
+  let current = '';
+  for (const line of text.split('\n')) {
+    if ((current + '\n' + line).length > limit) {
+      if (current) chunks.push(current);
+      let rest = line;
+      while (rest.length > limit) {
+        chunks.push(rest.slice(0, limit));
+        rest = rest.slice(limit);
+      }
+      current = rest;
+    } else {
+      current = current ? current + '\n' + line : line;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+// رد معطوب = فيه حروف تايلندي بدل العربي
+function isGarbled(text) {
+  return /[\u0E00-\u0E7F]/.test(text);
+}
+
+// ===== BEGIN cleanMath =====
+// بتحوّل أي LaTeX بيطلع من الموديل ($\rightarrow$ ، \frac ...) لرموز عادية بتنعرض صح بديسكورد
+const MATH_SYMBOLS = {
+  rightarrow: '→', Rightarrow: '⇒', to: '→', leftarrow: '←', Leftarrow: '⇐',
+  leftrightarrow: '↔', Leftrightarrow: '⇔', iff: '⇔', implies: '⇒', uparrow: '↑', downarrow: '↓',
+  cdot: '·', times: '×', div: '÷', pm: '±', mp: '∓',
+  le: '≤', leq: '≤', ge: '≥', geq: '≥', ne: '≠', neq: '≠', approx: '≈', equiv: '≡', sim: '∼', propto: '∝',
+  prime: '′', infty: '∞', degree: '°', circ: '°', angle: '∠', perp: '⊥', parallel: '∥', triangle: '△',
+  sum: '∑', prod: '∏', int: '∫', partial: '∂', nabla: '∇',
+  in: '∈', notin: '∉', subset: '⊂', subseteq: '⊆', cup: '∪', cap: '∩', emptyset: '∅',
+  forall: '∀', exists: '∃', therefore: '∴', because: '∵',
+  ldots: '…', cdots: '⋯', dots: '…',
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε', zeta: 'ζ', eta: 'η',
+  theta: 'θ', kappa: 'κ', lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', pi: 'π', rho: 'ρ', sigma: 'σ',
+  tau: 'τ', phi: 'φ', varphi: 'φ', chi: 'χ', psi: 'ψ', omega: 'ω',
+  Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Pi: 'Π', Sigma: 'Σ', Phi: 'Φ', Psi: 'Ψ', Omega: 'Ω',
+  quad: ' ', qquad: '  ', left: '', right: '', displaystyle: '', textstyle: '', limits: '', nolimits: '',
+};
+
+const MATH_FUNCS = new Set([
+  'ln', 'log', 'lg', 'sin', 'cos', 'tan', 'cot', 'sec', 'csc', 'sinh', 'cosh', 'tanh',
+  'arcsin', 'arccos', 'arctan', 'lim', 'max', 'min', 'exp', 'det', 'gcd', 'mod',
+]);
+
+const SUPERSCRIPT = {
+  0: '⁰', 1: '¹', 2: '²', 3: '³', 4: '⁴', 5: '⁵', 6: '⁶', 7: '⁷', 8: '⁸', 9: '⁹',
+  '+': '⁺', '-': '⁻', '−': '⁻', '=': '⁼', '(': '⁽', ')': '⁾',
+  a: 'ᵃ', b: 'ᵇ', c: 'ᶜ', d: 'ᵈ', e: 'ᵉ', f: 'ᶠ', g: 'ᵍ', h: 'ʰ', i: 'ⁱ', j: 'ʲ', k: 'ᵏ', l: 'ˡ',
+  m: 'ᵐ', n: 'ⁿ', o: 'ᵒ', p: 'ᵖ', r: 'ʳ', s: 'ˢ', t: 'ᵗ', u: 'ᵘ', v: 'ᵛ', w: 'ʷ', x: 'ˣ', y: 'ʸ', z: 'ᶻ',
+};
+
+const SUBSCRIPT = {
+  0: '₀', 1: '₁', 2: '₂', 3: '₃', 4: '₄', 5: '₅', 6: '₆', 7: '₇', 8: '₈', 9: '₉',
+  '+': '₊', '-': '₋', '−': '₋', '=': '₌', '(': '₍', ')': '₎',
+  a: 'ₐ', e: 'ₑ', h: 'ₕ', i: 'ᵢ', j: 'ⱼ', k: 'ₖ', l: 'ₗ', m: 'ₘ', n: 'ₙ', o: 'ₒ', p: 'ₚ',
+  r: 'ᵣ', s: 'ₛ', t: 'ₜ', u: 'ᵤ', v: 'ᵥ', x: 'ₓ',
+};
+
+const SIMPLE_TOKEN = /^-?(?:\d+(?:\.\d+)?|\p{L}+[²³¹⁰⁴-⁹ⁿ]*)$/u;
+const GREEK = new Set(['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'varepsilon', 'zeta', 'eta', 'theta', 'kappa',
+  'lambda', 'mu', 'nu', 'xi', 'pi', 'rho', 'sigma', 'tau', 'phi', 'varphi', 'chi', 'psi', 'omega',
+  'Gamma', 'Delta', 'Theta', 'Lambda', 'Pi', 'Sigma', 'Phi', 'Psi', 'Omega']);
+
+function mapChars(str, table) {
+  let out = '';
+  for (const ch of str.replace(/\s+/g, '')) {
+    if (!Object.prototype.hasOwnProperty.call(table, ch)) return null;
+    out += table[ch];
+  }
+  return out;
+}
+
+function toSuper(c) {
+  const m = mapChars(c, SUPERSCRIPT);
+  return m !== null ? m : `^(${c.trim()})`;
+}
+
+function toSub(c) {
+  const m = mapChars(c, SUBSCRIPT);
+  return m !== null ? m : `_(${c.trim()})`;
+}
+
+function wrapIfComplex(s) {
+  s = s.trim();
+  return SIMPLE_TOKEN.test(s) ? s : `(${s})`;
+}
+
+// بتقرا مجموعة {...} مع مراعاة الأقواس المتداخلة
+function readGroup(str, pos) {
+  while (str[pos] === ' ') pos++;
+  if (str[pos] !== '{') return null;
+  let depth = 0;
+  for (let i = pos; i < str.length; i++) {
+    if (str[i] === '{') depth++;
+    else if (str[i] === '}') {
+      depth--;
+      if (depth === 0) return { content: str.slice(pos + 1, i), end: i + 1 };
+    }
+  }
+  return null;
+}
+
+// بتبدل أمر LaTeX (من الأخير للأول عشان المتداخل يشتغل صح)
+function replaceLatexCommand(text, cmd, build) {
+  const re = new RegExp('\\\\' + cmd + '(?![a-zA-Z])', 'g');
+  for (let guard = 0; guard < 500; guard++) {
+    let last = null;
+    let m;
+    re.lastIndex = 0;
+    while ((m = re.exec(text)) !== null) last = m;
+    if (!last) break;
+    const start = last.index;
+    const after = start + last[0].length;
+    const built = build(text, after);
+    if (!built) {
+      text = text.slice(0, start) + text.slice(after);
+      continue;
+    }
+    text = text.slice(0, start) + built.text + text.slice(built.end);
+  }
+  return text;
+}
+
+const buildFrac = (t, pos) => {
+  const a = readGroup(t, pos);
+  if (!a) return null;
+  const b = readGroup(t, a.end);
+  if (!b) return null;
+  return { text: `${wrapIfComplex(a.content)}/${wrapIfComplex(b.content)}`, end: b.end };
+};
+
+const buildSqrt = (t, pos) => {
+  let idx = null;
+  if (t[pos] === '[') {
+    const close = t.indexOf(']', pos);
+    if (close !== -1) {
+      idx = t.slice(pos + 1, close);
+      pos = close + 1;
+    }
+  }
+  const g = readGroup(t, pos);
+  if (!g) return null;
+  const inner = g.content.trim();
+  const body = SIMPLE_TOKEN.test(inner) ? `√${inner}` : `√(${inner})`;
+  const prefix = idx ? (mapChars(idx, SUPERSCRIPT) || '') : '';
+  return { text: prefix + body, end: g.end };
+};
+
+const buildPlain = (t, pos) => {
+  const g = readGroup(t, pos);
+  return g ? { text: g.content, end: g.end } : null;
+};
+
+const buildAccent = (mark, each) => (t, pos) => {
+  const g = readGroup(t, pos);
+  if (!g) return null;
+  const c = g.content.trim();
+  return { text: each ? [...c].map((ch) => ch + mark).join('') : c + mark, end: g.end };
+};
+
+function cleanMathSegment(seg) {
+  // $$...$$ و $...$ (قاعدة pandoc: ما بنلمس الأسعار العادية زي 5$ و 10$)
+  seg = seg.replace(/\$\$([\s\S]+?)\$\$/g, '$1');
+  seg = seg.replace(/\$(?=\S)([^$\n]*?\S)\$(?!\d)/g, '$1');
+
+  const hasLatex = /\\[a-zA-Z]+|\\[(){}\[\]%&#_,;:! ]|\\\\|\^\{|_\{/.test(seg);
+  if (!hasLatex) return seg;
+
+  let hadEnv = false;
+  seg = seg.replace(/\\\{/g, '\u0001').replace(/\\\}/g, '\u0002');
+  seg = seg.replace(/\\\\/g, '\n');
+  seg = seg.replace(/\\(?:begin|end)\{[^}]*\}/g, () => { hadEnv = true; return ''; });
+  seg = seg.replace(/\\[()\[\]]/g, '');
+  seg = seg.replace(/\\[,;:]/g, ' ').replace(/\\!/g, '').replace(/\\ /g, ' ');
+  seg = seg.replace(/\\([%&#_$])/g, '$1');
+
+  // رموز ويونانية ودوال
+  seg = seg.replace(/\\([a-zA-Z]+)( ?)/g, (m, w, sp, offset, str) => {
+    if (Object.prototype.hasOwnProperty.call(MATH_SYMBOLS, w)) {
+      const next = str[offset + m.length] || '';
+      if (GREEK.has(w) && sp && /\p{L}/u.test(next)) return MATH_SYMBOLS[w];
+      return MATH_SYMBOLS[w] + sp;
+    }
+    if (MATH_FUNCS.has(w)) return w + sp;
+    return m;
+  });
+
+  // أوامر فيها أقواس
+  for (const c of ['frac', 'dfrac', 'tfrac']) seg = replaceLatexCommand(seg, c, buildFrac);
+  seg = replaceLatexCommand(seg, 'sqrt', buildSqrt);
+  for (const c of ['text', 'textbf', 'textit', 'mathrm', 'mathbf', 'mathit', 'mathbb', 'mathcal',
+    'boldsymbol', 'operatorname', 'mbox']) {
+    seg = replaceLatexCommand(seg, c, buildPlain);
+  }
+  seg = replaceLatexCommand(seg, 'vec', buildAccent('\u20D7', false));
+  seg = replaceLatexCommand(seg, 'hat', buildAccent('\u0302', false));
+  seg = replaceLatexCommand(seg, 'overline', buildAccent('\u0305', true));
+  seg = replaceLatexCommand(seg, 'bar', buildAccent('\u0305', true));
+
+  // أسس وأدلّة
+  seg = seg.replace(/\^\s*\{\s*°\s*\}|\^\s*°/g, '°');
+  seg = seg.replace(/\^\{([^{}]*)\}/g, (m, c) => toSuper(c));
+  seg = seg.replace(/\^(-?[0-9a-zA-Z])/g, (m, c) => toSuper(c));
+  seg = seg.replace(/_\{([^{}]*)\}/g, (m, c) => toSub(c));
+  seg = seg.replace(/_([0-9a-zA-Z])/g, (m, c) => toSub(c));
+
+  // أي أمر ما نعرفه: بنشيل الشرطة المائلة بس
+  seg = seg.replace(/\\([a-zA-Z]+)/g, '$1');
+  seg = seg.replace(/[{}]/g, '');
+  seg = seg.replace(/\u0001/g, '{').replace(/\u0002/g, '}');
+  if (hadEnv) seg = seg.replace(/[ \t]*&[ \t]*/g, ' ');
+  seg = seg.replace(/(\S)[ \t]{2,}/g, '$1 ');
+  return seg;
+}
+
+// بتنظف الرد كله بس ما بتلمس الكود (``` ``` و ` `)
+function cleanMath(text) {
+  if (typeof text !== 'string' || !text) return text;
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((part, i) => (i % 2 === 1 ? part : cleanMathSegment(part)))
+    .join('');
+}
+// ===== END cleanMath =====
+
+function isImage(att) {
+  if (att.contentType) return att.contentType.startsWith('image/');
+  return /\.(png|jpe?g|webp|gif)$/i.test(att.name || att.url || '');
+}
+
+function imageMime(att) {
+  const ct = (att.contentType || '').split(';')[0];
+  if (/^image\/(png|jpeg|webp|gif)$/.test(ct)) return ct;
+  const ext = ((att.name || att.url || '').split('?')[0].match(/\.(png|jpe?g|webp|gif)$/i) || [])[1];
+  if (!ext) return 'image/png';
+  const e = ext.toLowerCase();
+  return e === 'jpg' || e === 'jpeg' ? 'image/jpeg' : `image/${e}`;
+}
+
+// بينزّل الصورة وبيحولها base64 عشان الموديل يشوفها مباشرة
+async function imageToDataUrl(att) {
+  const res = await axios.get(att.url, {
+    responseType: 'arraybuffer',
+    timeout: 20000,
+    maxContentLength: MAX_IMAGE_BYTES,
+  });
+  const base64 = Buffer.from(res.data).toString('base64');
+  return `data:${imageMime(att)};base64,${base64}`;
+}
+
+// بتجرب الموديلات بالترتيب لحد ما واحد يعطي رد سليم
+async function askAI(messages, models, maxTokens = 1500) {
+  for (const model of models) {
+    try {
+      const response = await axios.post(
+        'https://openrouter.ai/api/v1/chat/completions',
+        { model, messages, temperature: 0.4, max_tokens: maxTokens },
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 90000,
         }
-        .card {
-            background-color: #121620; border: 1px solid #1f293d; padding: 40px; border-radius: 16px; width: 420px; text-align: center;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+      );
+
+      const reply = response.data?.choices?.[0]?.message?.content?.trim();
+      if (!reply) {
+        console.warn(`[${model}] رد فاضي، بجرب اللي بعده`);
+        continue;
+      }
+      if (isGarbled(reply)) {
+        console.warn(`[${model}] رد معطوب، بجرب اللي بعده`);
+        continue;
+      }
+      console.log('Model used:', response.data.model || model);
+      return cleanMath(reply);
+    } catch (error) {
+      const detail = error.response?.data?.error?.message || error.response?.data || error.message;
+      console.error(`[${model}] فشل:`, detail);
+    }
+  }
+  return null;
+}
+
+// ===================== البوت =====================
+const client = new Discord.Client({
+  intents: [
+    Discord.GatewayIntentBits.Guilds,
+    Discord.GatewayIntentBits.GuildMessages,
+    Discord.GatewayIntentBits.MessageContent,
+  ],
+  partials: [Discord.Partials.Channel],
+});
+
+client.on('clientReady', () => {
+  console.log(`Logged in as ${client.user.tag}!`);
+  client.user.setPresence({
+    status: 'online',
+    activities: [{ name: 'discord.gg/thailandcodes', type: Discord.ActivityType.Custom }],
+  });
+});
+
+client.on('messageCreate', async (message) => {
+  if (message.author.bot || !message.guild) return;
+  if (message.channel.id !== CHANNEL_ID) return;
+
+  let typingTimer;
+  try {
+    const userText = message.content.trim();
+    const attachments = [...message.attachments.values()];
+    const images = attachments.filter(isImage).slice(0, MAX_IMAGES);
+
+    // مرفق مش صورة وما في نص
+    if (!userText && attachments.length > 0 && images.length === 0) {
+      return await message.reply('ابعتلي صورة أو اكتب سؤالك نص 🙏');
+    }
+    if (!userText && images.length === 0) return;
+
+    // يضل مؤشر "typing" شغال طول ما بفكر
+    await message.channel.sendTyping();
+    typingTimer = setInterval(() => message.channel.sendTyping().catch(() => {}), 8000);
+
+    const conversations = loadConversations();
+    const history = conversations[message.author.id] || [];
+    const recent = history.slice(-HISTORY_MAX * 2);
+
+    let reply = null;
+    let savedUserText = userText;
+
+    if (images.length > 0) {
+      // ---------- معالجة الصور ----------
+      const question = userText || DEFAULT_IMAGE_QUESTION;
+      savedUserText = `${question} (مرفق ${images.length} صورة)`;
+
+      const imageParts = [];
+      for (const img of images) {
+        try {
+          imageParts.push({ type: 'image_url', image_url: { url: await imageToDataUrl(img) } });
+        } catch (e) {
+          console.error('فشل تنزيل الصورة:', e.message);
         }
-        .card h2 { color: #ffffff; margin-bottom: 10px; font-size: 24px; }
-        .card p { color: #9ca3af; margin-bottom: 25px; font-size: 14px; }
-        
-        .google-btn {
-            background-color: #ffffff; color: #111; border: none; padding: 14px 20px; border-radius: 10px; font-weight: bold; font-size: 15px;
-            cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; transition: 0.2s;
-        }
-        .google-btn:hover { background-color: #f3f4f6; transform: translateY(-2px); }
+      }
 
-        .card input {
-            width: 100%; background-color: #1a2230; border: 1px solid #2a364d; padding: 14px; border-radius: 10px; color: white;
-            font-size: 16px; margin-bottom: 20px; outline: none; text-align: center; font-weight: bold;
-        }
-        .card button.action-btn {
-            width: 100%; background-color: #8b5cf6; color: white; border: none; padding: 14px; border-radius: 10px; font-weight: bold; font-size: 16px; cursor: pointer; transition: 0.2s;
-        }
-        .card button.action-btn:hover { background-color: #7c3aed; }
+      if (imageParts.length > 0) {
+        reply = await askAI(
+          [
+            { role: 'system', content: SYSTEM_PROMPT },
+            ...recent,
+            { role: 'user', content: [{ type: 'text', text: question }, ...imageParts] },
+          ],
+          VISION_MODELS,
+          2000
+        );
+      }
 
-        /* التطبيق الرئيسي */
-        .app-container { display: flex; width: 100%; height: 100vh; display: none; }
-        .rail { width: 72px; background-color: #121620; display: flex; flex-direction: column; align-items: center; padding-top: 15px; gap: 12px; border-left: 1px solid #1f293d; }
-        .server-icon { width: 48px; height: 48px; background-color: #1e2530; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #8b5cf6; font-weight: bold; cursor: pointer; }
-        .server-icon.active { border-radius: 16px; background-color: #8b5cf6; color: #ffffff; }
-
-        .sub-sidebar { width: 280px; background-color: #121620; border-left: 1px solid #1f293d; display: flex; flex-direction: column; }
-        .sidebar-header { height: 60px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; font-weight: bold; border-bottom: 1px solid #1f293d; color: white; font-size: 15px; }
-        
-        .user-profile-box {
-            padding: 12px 16px; background-color: #0e121a; border-bottom: 1px solid #1f293d; display: flex; align-items: center; gap: 12px; cursor: pointer; transition: 0.2s;
-        }
-        .user-profile-box:hover { background-color: #161c29; }
-        .user-profile-box img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 2px solid #8b5cf6; }
-        .user-profile-box .u-info h4 { font-size: 14px; color: white; }
-        .user-profile-box .u-info p { font-size: 11px; color: #10b981; }
-
-        .friends-section { flex: 1; padding: 16px; overflow-y: auto; }
-        .section-title { font-size: 12px; color: #9ca3af; margin-bottom: 10px; font-weight: bold; text-transform: uppercase; }
-        .friend-item { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 8px; margin-bottom: 6px; background-color: #161c29; cursor: pointer; transition: 0.2s; }
-        .friend-item:hover { background-color: #1e2530; }
-        .status-dot { width: 10px; height: 10px; background-color: #10b981; border-radius: 50%; box-shadow: 0 0 8px #10b981; }
-
-        .add-friend-panel { padding: 12px; border-top: 1px solid #1f293d; display: flex; gap: 8px; background-color: #0e121a; }
-        .add-friend-panel input { flex: 1; background-color: #1a2230; border: 1px solid #2a364d; padding: 10px; border-radius: 8px; color: white; font-size: 13px; outline: none; }
-        .add-friend-panel button { background-color: #10b981; border: none; color: white; padding: 0 14px; border-radius: 8px; cursor: pointer; font-weight: bold; transition: 0.2s; }
-        .add-friend-panel button:hover { background-color: #059669; }
-
-        /* منطقة الإشعارات الجانبية */
-        .notifications-panel { width: 240px; background-color: #0f131c; border-left: 1px solid #1f293d; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
-        .notification-card { background-color: #181f2e; padding: 12px; border-radius: 10px; border-right: 4px solid #10b981; font-size: 13px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
-        .notification-card button { margin-top: 8px; background-color: #10b981; border: none; color: white; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: bold; width: 100%; }
-
-        /* الشات الرئيسي */
-        .chat-area { flex: 1; display: flex; flex-direction: column; background-color: #0b0e14; position: relative; }
-        .chat-header { height: 60px; background-color: #121620; border-bottom: 1px solid #1f293d; display: flex; align-items: center; justify-content: space-between; padding: 0 20px; font-weight: bold; font-size: 17px; color: #ffffff; }
-        .welcome-badge { background-color: #1a2230; padding: 6px 14px; border-radius: 20px; font-size: 13px; color: #10b981; border: 1px solid #2a364d; }
-        
-        .messages-box { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 15px; }
-        .message { background-color: #161c29; padding: 12px 16px; border-radius: 10px; max-width: 75%; border-right: 3px solid #8b5cf6; box-shadow: 0 2px 8px rgba(0,0,0,0.2); }
-        .message span { font-weight: bold; color: #10b981; margin-left: 10px; font-size: 14px; }
-        .message img { max-width: 220px; border-radius: 8px; margin-top: 8px; display: block; }
-        
-        .input-container { padding: 20px; background-color: #121620; display: flex; gap: 12px; border-top: 1px solid #1f293d; align-items: center; }
-        .input-container input[type="text"] { flex: 1; background-color: #1a2230; border: 1px solid #2a364d; padding: 14px; border-radius: 10px; color: white; outline: none; font-size: 15px; }
-        .media-btn { background-color: #1a2230; border: 1px solid #2a364d; color: #8b5cf6; width: 46px; height: 46px; border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; transition: 0.2s; }
-        .media-btn:hover { background-color: #2a364d; color: white; }
-        .input-container button.send-btn { background-color: #8b5cf6; color: white; border: none; padding: 0 26px; height: 46px; border-radius: 10px; font-weight: bold; cursor: pointer; font-size: 15px; transition: 0.2s; }
-        .input-container button.send-btn:hover { background-color: #7c3aed; }
-
-        /* قائمة كليك يمين مخصصة */
-        #contextMenu {
-            display: none; position: absolute; background: #121620; border: 1px solid #1f293d; border-radius: 10px;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.5); z-index: 2000; width: 170px; overflow: hidden;
-        }
-        .context-item { padding: 12px 16px; font-size: 13px; cursor: pointer; display: flex; align-items: center; gap: 10px; color: #d1d5db; transition: 0.2s; }
-        .context-item:hover { background: #1f293d; color: white; }
-        .context-item.danger { color: #ef4444; }
-        .context-item.danger:hover { background: rgba(239, 68, 68, 0.1); }
-
-        /* نافذة البروفايل */
-        #profileModal { display: none; }
-    </style>
-</head>
-<body>
-
-    <!-- 1. شاشة تسجيل الدخول -->
-    <div id="loginOverlay" class="overlay">
-        <div class="card">
-            <h2>يا معلم، أهلاً بك! 🚀</h2>
-            <p>سجّل دخولك بحساب جوجل لتفوت جو Maalem Chat الفخم!</p>
-            <button class="google-btn" onclick="loginWithGoogle()">
-                <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v4.51h6.6c-.29 1.52-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.66-5.17 3.66-9.17z"/><path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.12 0-5.77-2.1-6.72-4.93H1.19v3.15C3.17 21.36 7.22 24 12 24z"/><path fill="#FBBC05" d="M5.28 14.27c-.25-.72-.38-1.49-.38-2.27s.13-1.55.38-2.27V6.58H1.19C.43 8.1 0 9.99 0 12s.43 3.9 1.19 5.42l4.09-3.15z"/><path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.42-3.42C17.95 1.19 15.24 0 12 0 7.22 0 3.17 2.64 1.19 6.58l4.09 3.15c.95-2.83 3.6-4.98 6.72-4.98z"/></svg>
-                تسجيل الدخول بـ Google يا معلم
-            </button>
-        </div>
-    </div>
-
-    <!-- 2. نافذة اختيار اليوزر النيم الدقيق -->
-    <div id="usernameModal" class="overlay" style="display: none;">
-        <div class="card">
-            <h2>يا معلم، اختر يوزرك الملكي 👑</h2>
-            <p>هذا اليوزر اللي رح يبين قدام الشباب والصبايا بالموقع</p>
-            <input type="text" id="finalUsernameInput" placeholder="مثال: Maalem_Bashar">
-            <button class="action-btn" onclick="setUniqueUsername()">اعتمد يا معلم</button>
-        </div>
-    </div>
-
-    <!-- 3. التطبيق الرئيسي -->
-    <div class="app-container" id="appContainer">
-        <div class="rail">
-            <div class="server-icon active" title="معلم شات">💬</div>
-        </div>
-
-        <!-- القائمة الجانبية والأصدقاء -->
-        <div class="sub-sidebar">
-            <div class="sidebar-header">
-                <span>⚡ الأصدقاء والسيرفر</span>
-            </div>
-            
-            <!-- بروفايل المستخدم الحالي -->
-            <div class="user-profile-box" onclick="openProfileSettings()">
-                <img id="myProfileAvatar" src="https://via.placeholder.com/150" alt="صورة المعلم">
-                <div class="u-info">
-                    <h4 id="myProfileName">يا معلم، زائر</h4>
-                    <p>متصل الآن 🔥</p>
-                </div>
-            </div>
-
-            <div class="friends-section">
-                <div class="section-title">المتواجدون ع السيرفر</div>
-                <div id="usersList"></div>
-            </div>
-            <div class="add-friend-panel">
-                <input type="text" id="targetUser" placeholder="يوزر صديقك الدقيق...">
-                <button onclick="sendFriendRequest()">إضافة</button>
-            </div>
-        </div>
-
-        <!-- شات المحادثة -->
-        <div class="chat-area">
-            <div class="chat-header">
-                <span># غرفة-الألعاب-والعوام</span>
-                <div id="welcomeBadge" class="welcome-badge">منور يا معلم! 🔥</div>
-            </div>
-            <div id="messages" class="messages-box"></div>
-            
-            <div class="input-container">
-                <input type="file" id="imageInput" accept="image/*" style="display: none;" onchange="sendImageMessage(event)">
-                <button class="media-btn" onclick="document.getElementById('imageInput').click()" title="إرسال صورة يا معلم"><i class="fas fa-image"></i></button>
-                <input type="text" id="messageInput" placeholder="اكتب رسالتك يا معلم..." autocomplete="off">
-                <button class="send-btn" onclick="sendMessage()">إرسال</button>
-            </div>
-        </div>
-
-        <!-- لوحة الإشعارات الجانبية (طلبات الأصدقاء) -->
-        <div class="notifications-panel">
-            <div class="section-title">🔔 الإشعارات</div>
-            <div id="notificationsList">
-                <span style="font-size: 12px; color: #6b7280;">يا معلم، ما في إشعارات جديدة</span>
-            </div>
-        </div>
-    </div>
-
-    <!-- قائمة كليك يمين الذكية -->
-    <div id="contextMenu">
-        <div class="context-item" onclick="actionMute()"><i class="fas fa-bell-slash"></i> كتم الإشعارات</div>
-        <div class="context-item danger" onclick="actionBlock()"><i class="fas fa-ban"></i> حظر (بلوك)</div>
-        <div class="context-item danger" onclick="actionDelete()"><i class="fas fa-trash"></i> حذف المحادثة</div>
-    </div>
-
-    <script>
-        let socket;
-        let myUsername = "";
-        let myAvatar = "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=150";
-        let selectedTarget = "";
-
-        // التحقق من التخزين المحلي (localStorage) لتجنب تسجيل الدخول التكراري
-        window.onload = function() {
-            const savedUser = localStorage.getItem('maalem_chat_user');
-            const savedAvatar = localStorage.getItem('maalem_chat_avatar');
-            if (savedUser) {
-                myUsername = savedUser;
-                if (savedAvatar) myAvatar = savedAvatar;
-                
-                document.getElementById('loginOverlay').style.display = 'none';
-                document.getElementById('usernameModal').style.display = 'none';
-                document.getElementById('appContainer').style.display = 'flex';
-                
-                initAppSession();
-            }
-        };
-
-        function setUniqueUsername() {
-            const val = document.getElementById('finalUsernameInput').value.trim();
-            if (val === "") {
-                alert("يا معلم، ما بيضبط بدون يوزر صالح!");
-                return;
-            }
-            myUsername = val;
-            if (window.tempUserAvatar) myAvatar = window.tempUserAvatar;
-
-            // حفظ البيانات محلياً عشان يضل مسجل دخول
-            localStorage.setItem('maalem_chat_user', myUsername);
-            localStorage.setItem('maalem_chat_avatar', myAvatar);
-
-            document.getElementById('usernameModal').style.display = 'none';
-            document.getElementById('appContainer').style.display = 'flex';
-            
-            initAppSession();
-        }
-
-        function initAppSession() {
-            document.getElementById('welcomeBadge').innerText = `منور يا معلم ${myUsername}! 🔥`;
-            document.getElementById('myProfileName').innerText = `يا معلم، ${myUsername}`;
-            document.getElementById('myProfileAvatar').src = myAvatar;
-
-            socket = io();
-            socket.emit('join_user', myUsername);
-
-            socket.on('receive_message', (data) => {
-                const box = document.getElementById('messages');
-                let content = data.text;
-                if (data.type === 'image') {
-                    content = `<img src="${data.url}" alt="صورة مرسلة">`;
-                }
-                box.innerHTML += `<div class="message"><span>${data.user}:</span> ${content}</div>`;
-                box.scrollTop = box.scrollHeight;
-            });
-
-            socket.on('update_users', (users) => {
-                const list = document.getElementById('usersList');
-                list.innerHTML = users.map(u => `
-                    <div class="friend-item" oncontextmenu="showContextMenu(event, '${u}')">
-                        <div class="status-dot"></div>
-                        <span>${u}</span>
-                    </div>
-                `).join('');
-            });
-
-            socket.on('friend_request', (data) => {
-                const notifList = document.getElementById('notificationsList');
-                if (notifList.innerHTML.includes('ما في إشعارات')) notifList.innerHTML = '';
-                notifList.innerHTML += `
-                    <div class="notification-card">
-                        <b>${data.from}</b> يا معلم بعثلك طلب إضافة!
-                        <br><button onclick="this.parentElement.remove(); alert('يا معلم، تم قبول الصديق بنجاح!');">قبول الطلب</button>
-                    </div>
-                `;
-            });
-        }
-
-        function sendMessage() {
-            const input = document.getElementById('messageInput');
-            if (input.value.trim() !== '') {
-                socket.emit('send_message', { user: myUsername, text: input.value, type: 'text' });
-                input.value = '';
-            }
-        }
-
-        // إرسال الصور بضغط زر أو اختيار ملف
-        function sendImageMessage(event) {
-            const file = event.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    socket.emit('send_message', { user: myUsername, url: e.target.result, type: 'image' });
-                };
-                reader.readAsDataURL(file);
-            }
-        }
-
-        document.getElementById('messageInput')?.addEventListener('keypress', function (e) {
-            if (e.key === 'Enter') sendMessage();
+      // إذا ما فيه موديل بيشوف الصور اشتغل، ما نخمّن (OCR بيخرّب الرموز الرياضية)
+      if (!reply) {
+        return await message.reply({
+          content: 'ما قدرت أشوف الصورة هلأ 😔 جرب كمان شوي، أو اكتب السؤال نص.',
+          allowedMentions: { parse: [] },
         });
+      }
+    } else {
+      // ---------- سؤال نصي ----------
+      reply = await askAI(
+        [
+          { role: 'system', content: SYSTEM_PROMPT },
+          ...recent,
+          { role: 'user', content: userText },
+        ],
+        TEXT_MODELS
+      );
+    }
 
-        function sendFriendRequest() {
-            const target = document.getElementById('targetUser').value.trim();
-            if (target !== '') {
-                socket.emit('send_friend_request', { from: myUsername, to: target });
-                alert('يا معلم، تم إرسال طلب الاضافة للمستخدم: ' + target);
-                document.getElementById('targetUser').value = '';
-            }
-        }
+    if (!reply) {
+      return await message.reply({
+        content: 'صار عندي خطأ بسيط، جرب كمان شوي 🙏',
+        allowedMentions: { parse: [] },
+      });
+    }
 
-        // إعدادات البروفايل السريعة
-        function openProfileSettings() {
-            const newName = prompt("يا معلم، أدخل اسمك الجديد:", myUsername);
-            if (newName) {
-                myUsername = newName.trim();
-                localStorage.setItem('maalem_chat_user', myUsername);
-                document.getElementById('myProfileName').innerText = `يا معلم، ${myUsername}`;
-                document.getElementById('welcomeBadge').innerText = `منور يا معلم ${myUsername}! 🔥`;
-            }
-        }
+    // الرد بنفس الشات (مقسّم إذا طويل)، بدون ملفات
+    const chunks = splitMessage(reply);
+    await message.reply({ content: chunks[0], allowedMentions: { parse: [] } });
+    for (const chunk of chunks.slice(1)) {
+      await message.channel.send({ content: chunk, allowedMentions: { parse: [] } });
+    }
 
-        // قائمة كليك يمين الذكية
-        const menu = document.getElementById('contextMenu');
-        function showContextMenu(e, targetName) {
-            e.preventDefault();
-            selectedTarget = targetName;
-            menu.style.display = 'block';
-            menu.style.left = e.pageX + 'px';
-            menu.style.top = e.pageY + 'px';
-        }
+    // حفظ المحادثة (نص بس، بدون صور، وآخر رسائل بس عشان الملف ما يكبر)
+    conversations[message.author.id] = [
+      ...history,
+      { role: 'user', content: savedUserText },
+      { role: 'assistant', content: reply },
+    ].slice(-HISTORY_MAX * 2);
+    saveConversations(conversations);
+  } catch (error) {
+    console.error('Error:', error.response?.data || error.message);
+    await message.reply({
+      content: 'صار عندي خطأ بسيط، جرب كمان شوي 🙏',
+      allowedMentions: { parse: [] },
+    }).catch(() => {});
+  } finally {
+    clearInterval(typingTimer);
+  }
+});
 
-        window.addEventListener('click', () => {
-            menu.style.display = 'none';
-        });
+// عشان أي خطأ غير متوقع ما يوقّف البوت
+process.on('unhandledRejection', (err) => console.error('Unhandled:', err));
 
-        function actionMute() {
-            alert(`يا معلم، تم كتم إشعارات المستخدم: ${selectedTarget} بنجاح! 🔕`);
-        }
-        function actionBlock() {
-            alert(`يا معلم، تم حظر (بلوك) المستخدم: ${selectedTarget}! 🚫`);
-        }
-        function actionDelete() {
-            alert(`يا معلم، تم حذف المحادثة مع: ${selectedTarget}! 🗑️`);
-        }
-    </script>
-</body>
-</html>
+client.login(process.env.DISCORD_TOKEN);
